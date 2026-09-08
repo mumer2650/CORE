@@ -88,8 +88,18 @@ async def rag_node(state: AgentState) -> dict:
         allow_partial=False
     )
     
+    # Fix for Gemini SDK bug: AIMessages with tool calls often have empty content string ""
+    # This causes 'ValueError: contents are required' in the Gemini adapter when fed back into history.
+    safe_messages = []
+    for msg in trimmed_messages:
+        if isinstance(msg, AIMessage) and not msg.content:
+            safe_msg = AIMessage(content=" ", tool_calls=getattr(msg, "tool_calls", []), additional_kwargs=getattr(msg, "additional_kwargs", {}))
+            safe_messages.append(safe_msg)
+        else:
+            safe_messages.append(msg)
+            
     # We pass the system prompt followed by the trimmed conversation history
-    invoke_messages = [SystemMessage(content=system_prompt)] + trimmed_messages
+    invoke_messages = [SystemMessage(content=system_prompt)] + safe_messages
     
     response = await llm.ainvoke(invoke_messages)
     
@@ -117,9 +127,11 @@ async def supervisor_node(state: AgentState) -> dict:
 Your job is to read the user's input and decide which subsystem should handle it.
 
 Route to 'rag_node' IF AND ONLY IF:
-- The user is asking about uploaded documents, specific files, corporate knowledge, or external facts that likely require database retrieval.
+- The user is explicitly asking about uploaded documents, PDFs, specific corporate files, or internal data that is stored in their private database.
 
 Route to 'general_chat_node' IF:
+- The user is asking about current events, live news, or external facts (this node has a Web Search tool).
+- The user is asking to evaluate a math problem (this node has a Calculator tool).
 - The user is asking general questions, writing code, chatting, greeting, or asking about themselves/their profile facts.
 
 Make your decision carefully."""
@@ -181,7 +193,7 @@ async def general_chat_node(state: AgentState) -> dict:
     # 3. Trim Messages
     trimmed_messages = trim_messages(
         messages,
-        max_tokens=10, 
+        max_tokens=40, 
         token_counter=len,
         strategy="last",
         include_system=False,
@@ -189,9 +201,21 @@ async def general_chat_node(state: AgentState) -> dict:
         allow_partial=False
     )
     
-    invoke_messages = [SystemMessage(content=system_prompt)] + trimmed_messages
+    # Fix for Gemini SDK bug: AIMessages with tool calls often have empty content string ""
+    # This causes 'ValueError: contents are required' in the Gemini adapter when fed back into history.
+    safe_messages = []
+    for msg in trimmed_messages:
+        if isinstance(msg, AIMessage) and not msg.content:
+            safe_msg = AIMessage(content=" ", tool_calls=getattr(msg, "tool_calls", []), additional_kwargs=getattr(msg, "additional_kwargs", {}))
+            safe_messages.append(safe_msg)
+        else:
+            safe_messages.append(msg)
+            
+    invoke_messages = [SystemMessage(content=system_prompt)] + safe_messages
     
-    response = await llm.ainvoke(invoke_messages)
+    from app.graph.tools import core_tools
+    llm_with_tools = llm.bind_tools(core_tools)
+    response = await llm_with_tools.ainvoke(invoke_messages)
     
     return {
         "messages": [response],

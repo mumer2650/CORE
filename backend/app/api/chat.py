@@ -53,6 +53,8 @@ async def chat_with_agent(
             "context_used": result.get("context", "")
         }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{thread_id}/history")

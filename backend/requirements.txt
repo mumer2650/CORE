@@ -18,3 +18,4 @@ langchain-google-genai
 langgraph-checkpoint-postgres
 mem0ai
 litellm
+duckduckgo-search
