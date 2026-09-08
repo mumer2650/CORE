@@ -1,23 +1,74 @@
 from langgraph.graph import StateGraph, END
 from app.graph.state import AgentState
-from app.graph.nodes import rag_node
+from app.graph.nodes import rag_node, supervisor_node, general_chat_node
 from app.core.checkpointer import checkpointer
+from langgraph.prebuilt import ToolNode
+from app.graph.tools import safe_tools, sensitive_tools, all_tools
+
+def route_decision(state: AgentState) -> str:
+    # Read the next_node string from the state to determine the route
+    return state.get("next_node", "general_chat_node")
+
+def route_tools(state: AgentState) -> str:
+    """Routes to sensitive_tools if ANY tool call is dangerous, else safe_tools."""
+    messages = state.get("messages", [])
+    if not messages:
+        return END
+    last_message = messages[-1]
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        sensitive_tool_names = [t.name for t in sensitive_tools]
+        if any(tc["name"] in sensitive_tool_names for tc in last_message.tool_calls):
+            return "sensitive_tools"
+        return "safe_tools"
+    return END
 
 def create_basic_rag_graph():
     """
-    Creates a simple workflow graph for Phase 1 & 2.
+    Creates a supervisor-routed workflow graph for Phase 3.
     """
     workflow = StateGraph(AgentState)
     
     # Add nodes
-    workflow.add_node("rag", rag_node)
+    workflow.add_node("supervisor", supervisor_node)
+    workflow.add_node("rag_node", rag_node)
+    workflow.add_node("general_chat_node", general_chat_node)
+    
+    # Tool nodes
+    workflow.add_node("safe_tools", ToolNode(safe_tools))
+    workflow.add_node("sensitive_tools", ToolNode(all_tools)) # Has all tools so it can run mixed batches if approved
     
     # Add edges
-    workflow.set_entry_point("rag")
-    workflow.add_edge("rag", END)
+    workflow.set_entry_point("supervisor")
     
-    # Compile graph with the postgres checkpointer
-    return workflow.compile(checkpointer=checkpointer)
+    # Conditional edge from supervisor to workers
+    workflow.add_conditional_edges(
+        "supervisor",
+        route_decision,
+        {
+            "rag_node": "rag_node",
+            "general_chat_node": "general_chat_node"
+        }
+    )
+    
+    # End edges
+    workflow.add_edge("rag_node", END)
+    
+    # Route general_chat_node output based on tool types
+    workflow.add_conditional_edges("general_chat_node", route_tools, {
+        "safe_tools": "safe_tools",
+        "sensitive_tools": "sensitive_tools",
+        END: END
+    })
+    
+    # Tools nodes always route back to the chat node
+    workflow.add_edge("safe_tools", "general_chat_node")
+    workflow.add_edge("sensitive_tools", "general_chat_node")
+    
+    # Compile graph with the postgres checkpointer and HITL interrupt
+    return workflow.compile(
+        checkpointer=checkpointer,
+        interrupt_before=["sensitive_tools"]
+    )
 
 # Instantiate the compiled graph so it can be imported by the API
 rag_graph = create_basic_rag_graph()
