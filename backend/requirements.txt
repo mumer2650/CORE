@@ -16,3 +16,5 @@ langchain-huggingface
 sentence-transformers
 langchain-google-genai
 langgraph-checkpoint-postgres
+mem0ai
+litellm

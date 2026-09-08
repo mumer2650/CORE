@@ -40,10 +40,35 @@ async def rag_node(state: AgentState) -> dict:
     # 2. Format context
     context = "\n\n".join([doc.page_content for doc in docs])
     
-    # 3. Generate Answer
+    # 3. Retrieve Long-Term Memory (Mem0)
+    try:
+        from app.core.memory import long_term_memory
+        memories = long_term_memory.search(last_message, filters={"user_id": user_id})
+        
+        # In newer versions of Mem0, search returns a dict like {"results": [{memory}]}
+        if isinstance(memories, dict) and "results" in memories:
+            memories_list = memories["results"]
+        elif isinstance(memories, list):
+            memories_list = memories
+        else:
+            memories_list = []
+            
+        if memories_list:
+            profile_facts = "\n".join([f"- {m.get('memory', m)}" if isinstance(m, dict) else f"- {m}" for m in memories_list])
+        else:
+            profile_facts = "No relevant profile facts found."
+    except Exception as e:
+        print(f"Mem0 search error: {str(e)}")
+        profile_facts = "Could not retrieve user profile."
+    
+    # 4. Generate Answer
     system_prompt = f"""You are a helpful AI assistant representing the CORE platform. 
     Use the following retrieved context to answer the user's question. 
     If the context does not contain the answer, politely state that you do not know based on the provided documents.
+    
+    --- USER PROFILE (Mem0 Long-Term Memory) ---
+    {profile_facts}
+    --------------------------------------------
     
     Context:
     {context}

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, BackgroundTasks
 from pydantic import BaseModel
 from app.core.security import get_current_user_id
 from app.graph.graph import rag_graph
 from app.core.checkpointer import checkpointer
+from app.core.memory import extract_memory_background
 from langchain_core.messages import HumanMessage
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
@@ -14,12 +15,17 @@ class ChatRequest(BaseModel):
 @router.post("/")
 async def chat_with_agent(
     request: ChatRequest,
+    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user_id)
 ):
     """
     Endpoint to send a message to the RAG Agent and get a response.
     Includes thread_id for short-term memory (LangGraph checkpointer).
+    Triggers Mem0 extraction in the background.
     """
+    # Spawn background task for Mem0 extraction (doesn't block the chat response)
+    background_tasks.add_task(extract_memory_background, request.message, user_id)
+    
     # When using a checkpointer, we only need to pass the NEW message.
     # LangGraph will automatically load the historical messages from the database.
     input_state = {
