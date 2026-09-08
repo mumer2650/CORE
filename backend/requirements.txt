@@ -6,3 +6,4 @@ langchain-core
 python-multipart
 pypdf
 PyJWT
+python-dotenv

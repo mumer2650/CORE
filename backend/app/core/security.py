@@ -2,6 +2,10 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 import jwt
 import os
+from dotenv import load_dotenv
+
+# Load variables from .env file into the environment
+load_dotenv()
 
 # The URL where the frontend would send credentials to get a token.
 # Adjust this based on your actual authentication endpoint.
