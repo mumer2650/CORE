@@ -7,3 +7,10 @@ python-multipart
 pypdf
 PyJWT
 python-dotenv
+langchain-postgres
+psycopg[binary,pool]
+pgvector
+langchain-community
+langchain-text-splitters
+langchain-huggingface
+sentence-transformers
