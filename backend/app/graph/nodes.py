@@ -1,7 +1,7 @@
 from app.graph.state import AgentState
 from app.core.vector_store import get_vector_store
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, trim_messages
 import os
 
 # Initialize the LLM (Requires GOOGLE_API_KEY in .env)
@@ -49,8 +49,21 @@ async def rag_node(state: AgentState) -> dict:
     {context}
     """
     
-    # We pass the system prompt followed by the user's conversation history
-    invoke_messages = [SystemMessage(content=system_prompt)] + messages
+    # 4. Trim Messages (Context Window Management)
+    # We keep only the last 10 messages to avoid hitting token limits,
+    # ensuring the trimmed list always starts with a HumanMessage.
+    trimmed_messages = trim_messages(
+        messages,
+        max_tokens=10, 
+        token_counter=len, # Treating each message as 1 token for simplicity
+        strategy="last",
+        include_system=False,
+        start_on="human",
+        allow_partial=False
+    )
+    
+    # We pass the system prompt followed by the trimmed conversation history
+    invoke_messages = [SystemMessage(content=system_prompt)] + trimmed_messages
     
     response = await llm.ainvoke(invoke_messages)
     
