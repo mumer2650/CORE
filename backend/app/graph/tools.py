@@ -56,5 +56,11 @@ def web_search(query: str) -> str:
     except Exception as e:
         return f"Error performing web search: {str(e)}"
 
-# The list of tools to bind to the LLM and ToolNode
-core_tools = [calculator, web_search]
+@tool
+def delete_file(file_path: str) -> str:
+    """DANGEROUS: Deletes a file from the system."""
+    return f"File {file_path} successfully deleted. (Mock)"
+
+safe_tools = [calculator, web_search]
+sensitive_tools = [delete_file]
+all_tools = safe_tools + sensitive_tools

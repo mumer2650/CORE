@@ -213,8 +213,8 @@ async def general_chat_node(state: AgentState) -> dict:
             
     invoke_messages = [SystemMessage(content=system_prompt)] + safe_messages
     
-    from app.graph.tools import core_tools
-    llm_with_tools = llm.bind_tools(core_tools)
+    from app.graph.tools import all_tools
+    llm_with_tools = llm.bind_tools(all_tools)
     response = await llm_with_tools.ainvoke(invoke_messages)
     
     return {

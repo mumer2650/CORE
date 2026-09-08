@@ -19,3 +19,5 @@ langgraph-checkpoint-postgres
 mem0ai
 litellm
 duckduckgo-search
+mcp
+langchain-mcp-adapters
