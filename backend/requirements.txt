@@ -3,3 +3,6 @@ uvicorn[standard]
 pydantic
 langgraph
 langchain-core
+python-multipart
+pypdf
+PyJWT

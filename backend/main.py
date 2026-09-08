@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.ingestion import router as ingestion_router
 
 app = FastAPI(
     title="CORE - Agentic Chatbot API",
@@ -15,6 +16,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(ingestion_router)
 
 @app.get("/")
 async def root():
