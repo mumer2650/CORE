@@ -1,11 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.ingestion import router as ingestion_router
+from contextlib import asynccontextmanager
+from app.core.checkpointer import pool, checkpointer
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Open the connection pool and create checkpointer tables in Supabase
+    await pool.open()
+    await checkpointer.setup()
+    yield
+    # Shutdown: Close the connection pool
+    await pool.close()
 
 app = FastAPI(
     title="CORE - Agentic Chatbot API",
     description="Backend API for the CORE multi-tenant agentic chatbot.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Set up CORS for the frontend React app

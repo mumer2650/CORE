@@ -8,6 +8,7 @@ router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
 class ChatRequest(BaseModel):
     message: str
+    thread_id: str
 
 @router.post("/")
 async def chat_with_agent(
@@ -16,18 +17,26 @@ async def chat_with_agent(
 ):
     """
     Endpoint to send a message to the RAG Agent and get a response.
+    Includes thread_id for short-term memory (LangGraph checkpointer).
     """
-    # Initialize the state for this request
-    # Note: In Phase 2, we will use a Checkpointer to load existing messages. 
-    # For Phase 1, it's a stateless single-turn RAG.
-    initial_state = {
+    # When using a checkpointer, we only need to pass the NEW message.
+    # LangGraph will automatically load the historical messages from the database.
+    input_state = {
         "messages": [HumanMessage(content=request.message)],
         "metadata": {"user_id": user_id}
     }
     
+    # Configuration for the checkpointer
+    config = {
+        "configurable": {
+            "thread_id": request.thread_id,
+            "user_id": user_id
+        }
+    }
+    
     try:
         # Invoke the LangGraph workflow
-        result = await rag_graph.ainvoke(initial_state)
+        result = await rag_graph.ainvoke(input_state, config)
         
         # Extract the AI's response from the last message in the state
         ai_message = result["messages"][-1].content
