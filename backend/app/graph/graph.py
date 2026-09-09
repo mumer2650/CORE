@@ -1,22 +1,32 @@
 from langgraph.graph import StateGraph, END
 from app.graph.state import AgentState
-from app.graph.nodes import rag_node, supervisor_node, general_chat_node
+from app.graph.nodes import rag_node, supervisor_node, general_chat_node, sensitive_tools_node
 from app.core.checkpointer import checkpointer
 from langgraph.prebuilt import ToolNode
 from app.graph.tools import safe_tools, sensitive_tools, all_tools
+from langchain_core.runnables import RunnableConfig
 
 def route_decision(state: AgentState) -> str:
     # Read the next_node string from the state to determine the route
     return state.get("next_node", "general_chat_node")
 
-def route_tools(state: AgentState) -> str:
-    """Routes to sensitive_tools if ANY tool call is dangerous, else safe_tools."""
+def route_tools(state: AgentState, config: RunnableConfig) -> str:
+    """Routes to sensitive_tools if ANY tool call is dangerous or remote, else safe_tools."""
     messages = state.get("messages", [])
     if not messages:
         return END
     last_message = messages[-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        sensitive_tool_names = [t.name for t in sensitive_tools]
+        user_id = config["configurable"].get("user_id")
+        from app.api.mcp import user_mcp_registry
+        dynamic_tool_names = []
+        if user_id and user_id in user_mcp_registry:
+            for s in user_mcp_registry[user_id]:
+                for t in s.tools:
+                    dynamic_tool_names.append(t.name)
+                    
+        sensitive_tool_names = [t.name for t in sensitive_tools] + dynamic_tool_names
+        
         if any(tc["name"] in sensitive_tool_names for tc in last_message.tool_calls):
             return "sensitive_tools"
         return "safe_tools"
@@ -35,7 +45,7 @@ def create_basic_rag_graph():
     
     # Tool nodes
     workflow.add_node("safe_tools", ToolNode(safe_tools))
-    workflow.add_node("sensitive_tools", ToolNode(all_tools)) # Has all tools so it can run mixed batches if approved
+    workflow.add_node("sensitive_tools", sensitive_tools_node) # Custom node that supports dynamic remote tools
     
     # Add edges
     workflow.set_entry_point("supervisor")
