@@ -2,6 +2,7 @@ from app.graph.state import AgentState
 from app.core.vector_store import get_vector_store
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, trim_messages
+from langchain_core.runnables import RunnableConfig
 import os
 from pydantic import BaseModel, Field
 
@@ -80,7 +81,7 @@ async def rag_node(state: AgentState) -> dict:
     # ensuring the trimmed list always starts with a HumanMessage.
     trimmed_messages = trim_messages(
         messages,
-        max_tokens=10, 
+        max_tokens=4000, 
         token_counter=len, # Treating each message as 1 token for simplicity
         strategy="last",
         include_system=False,
@@ -128,10 +129,11 @@ Your job is to read the user's input and decide which subsystem should handle it
 
 Route to 'rag_node' IF AND ONLY IF:
 - The user is explicitly asking about uploaded documents, PDFs, specific corporate files, or internal data that is stored in their private database.
+- IMPORTANT: Do NOT route to 'rag_node' for queries about GitHub, external integrations, or MCP tools.
 
 Route to 'general_chat_node' IF:
-- The user is asking about current events, live news, or external facts (this node has a Web Search tool).
-- The user is asking to evaluate a math problem (this node has a Calculator tool).
+- The user is asking about current events, live news, or external facts.
+- The user is asking to use their GitHub account or other connected integrations (this node has access to MCP tools).
 - The user is asking general questions, writing code, chatting, greeting, or asking about themselves/their profile facts.
 
 Make your decision carefully."""
@@ -149,7 +151,7 @@ Make your decision carefully."""
         return {"next_node": "general_chat_node"}
 
 
-async def general_chat_node(state: AgentState) -> dict:
+async def general_chat_node(state: AgentState, config: RunnableConfig) -> dict:
     """
     General Chat Node: Handles conversational queries without the overhead of PGVector retrieval.
     Still uses Mem0 for long-term user profile context.
@@ -193,8 +195,8 @@ async def general_chat_node(state: AgentState) -> dict:
     # 3. Trim Messages
     trimmed_messages = trim_messages(
         messages,
-        max_tokens=40, 
-        token_counter=len,
+        max_tokens=4000, 
+        token_counter=len, # Note: using len is a naive token counter (character count), so 4000 is ~1000 tokens
         strategy="last",
         include_system=False,
         start_on="human",
@@ -214,10 +216,112 @@ async def general_chat_node(state: AgentState) -> dict:
     invoke_messages = [SystemMessage(content=system_prompt)] + safe_messages
     
     from app.graph.tools import all_tools
-    llm_with_tools = llm.bind_tools(all_tools)
+    from app.api.mcp import user_mcp_registry
+    
+    # 4. Fetch Dynamic MCP Tools for this user
+    user_id = config["configurable"].get("user_id")
+    dynamic_tool_schemas = []
+    if user_id and user_id in user_mcp_registry:
+        for server in user_mcp_registry[user_id]:
+            for t in server.tools:
+                schema = {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.inputSchema
+                    }
+                }
+                dynamic_tool_schemas.append(schema)
+                
+    # Bind statically defined tools + dynamic schemas
+    llm_with_tools = llm.bind_tools(all_tools + dynamic_tool_schemas)
     response = await llm_with_tools.ainvoke(invoke_messages)
     
     return {
         "messages": [response],
         "context": "No context retrieved. (General Chat Node)"
     }
+
+async def sensitive_tools_node(state: AgentState, config: RunnableConfig):
+    """
+    Custom node to execute sensitive tools (both local and remote MCP).
+    """
+    from langchain_core.messages import ToolMessage
+    from app.api.mcp import user_mcp_registry
+    
+    last_message = state["messages"][-1]
+    tool_calls = getattr(last_message, "tool_calls", [])
+    user_id = config["configurable"].get("user_id")
+    
+    results = []
+    
+    for tc in tool_calls:
+        name = tc["name"]
+        args = tc["args"]
+        
+        # 1. Check if it's a local tool
+        from app.graph.tools import sensitive_tools, safe_tools
+        local_tool = next((t for t in sensitive_tools + safe_tools if t.name == name), None)
+        if local_tool:
+            try:
+                res = await local_tool.ainvoke(args)
+                results.append(ToolMessage(tool_call_id=tc["id"], name=name, content=str(res)))
+            except Exception as e:
+                results.append(ToolMessage(tool_call_id=tc["id"], name=name, content=f"Error: {e}"))
+            continue
+            
+        # 2. Check if it's a dynamic remote tool
+        found = False
+        if user_id and user_id in user_mcp_registry:
+            for server in user_mcp_registry[user_id]:
+                if any(t.name == name for t in server.tools):
+                    if server.transport == "sse":
+                        from mcp.client.sse import sse_client
+                        from mcp import ClientSession
+                        
+                        headers = {}
+                        if server.token:
+                            headers["Authorization"] = f"Bearer {server.token}"
+                            
+                        try:
+                            async with sse_client(server.url, headers=headers) as (read, write):
+                                async with ClientSession(read, write) as session:
+                                    await session.initialize()
+                                    mcp_res = await session.call_tool(name, arguments=args)
+                                    content_str = "\n".join([c.text for c in mcp_res.content if c.type == "text"])
+                                    results.append(ToolMessage(tool_call_id=tc["id"], name=name, content=content_str))
+                        except Exception as e:
+                            results.append(ToolMessage(tool_call_id=tc["id"], name=name, content=f"Remote MCP Error: {e}"))
+                    elif server.transport == "stdio":
+                        from mcp.client.stdio import stdio_client, StdioServerParameters
+                        from mcp import ClientSession
+                        import os
+                        
+                        env_dict = None
+                        if server.env:
+                            env_dict = os.environ.copy()
+                            env_dict.update(server.env)
+                            
+                        server_params = StdioServerParameters(
+                            command=server.command,
+                            args=server.args or [],
+                            env=env_dict
+                        )
+                        try:
+                            async with stdio_client(server_params) as (read, write):
+                                async with ClientSession(read, write) as session:
+                                    await session.initialize()
+                                    mcp_res = await session.call_tool(name, arguments=args)
+                                    content_str = "\n".join([c.text for c in mcp_res.content if c.type == "text"])
+                                    results.append(ToolMessage(tool_call_id=tc["id"], name=name, content=content_str))
+                        except Exception as e:
+                            results.append(ToolMessage(tool_call_id=tc["id"], name=name, content=f"Local MCP Error: {e}"))
+                    
+                    found = True
+                    break
+                    
+        if not found:
+            results.append(ToolMessage(tool_call_id=tc["id"], name=name, content="Error: Tool not found."))
+            
+    return {"messages": results}
