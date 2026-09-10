@@ -43,6 +43,12 @@ function App() {
         if (res.ok) {
           const data = await res.json();
           setMessages(data.messages || []);
+        } else if (res.status === 401 || res.status === 403) {
+          // Unauthorized or Forbidden: token is invalid, expired, or access denied
+          localStorage.removeItem('token');
+          localStorage.removeItem('threadId');
+          setToken(null);
+          setThreadId(`thread_${Math.random().toString(36).substring(7)}`);
         } else {
           setMessages([]);
         }
@@ -84,6 +90,14 @@ function App() {
         },
         body: JSON.stringify({ message: userMessage, thread_id: threadId }),
       });
+
+      if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('threadId');
+        setToken(null);
+        setThreadId(`thread_${Math.random().toString(36).substring(7)}`);
+        return;
+      }
 
       if (!response.body) throw new Error('No readable stream');
 
@@ -227,7 +241,13 @@ function App() {
             <ThreadManager currentThread={threadId} onSelectThread={handleThreadChange} />
             <div className="w-px h-6 bg-border"></div>
             <button 
-              onClick={() => { localStorage.removeItem('token'); setToken(null); }}
+              onClick={() => { 
+                localStorage.removeItem('token'); 
+                localStorage.removeItem('threadId');
+                setToken(null); 
+                setThreadId(`thread_${Math.random().toString(36).substring(7)}`);
+                setMessages([]);
+              }}
               className="text-sm text-slate-500 hover:text-rose-400 transition-colors"
             >
               Sign out

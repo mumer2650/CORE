@@ -327,14 +327,21 @@ async def get_threads(user_id: str = Depends(get_current_user_id)):
             rows = await cur.fetchall()
             return {"threads": [r[0] for r in rows]}
 
+from fastapi import HTTPException
+
 @router.get("/threads/{thread_id}")
 async def get_thread_history(thread_id: str, user_id: str = Depends(get_current_user_id)):
-    """Retrieves the conversation history for a specific thread."""
+    """Retrieves the conversation history for a specific thread, ensuring the user owns it."""
     config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
     state = await rag_graph.aget_state(config)
     
     if not state or not state.values:
         return {"messages": []}
+        
+    # Enforce Auth: Check if the user trying to access the thread is the one who created it.
+    thread_user = state.values.get("metadata", {}).get("user_id")
+    if thread_user and thread_user != user_id:
+        raise HTTPException(status_code=403, detail="Access denied: You do not own this thread.")
         
     messages = state.values.get("messages", [])
     history = []
