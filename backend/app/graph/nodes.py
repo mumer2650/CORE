@@ -194,6 +194,12 @@ async def general_chat_node(state: AgentState, config: RunnableConfig) -> dict:
     You are in a general conversation with the user.
     IMPORTANT: Do NOT proactively mention the user's profile facts, name, or memories unless they are explicitly asked about or directly relevant to answering their current question. Keep greetings concise.
     
+    FORMATTING RULES:
+    - ALWAYS format lists using proper Markdown bullets (e.g., `- **Item Name:** Description`).
+    - Never leave dangling markdown syntax like unmatched `**`.
+    - Provide clear, highly readable, and structured responses. 
+    - If summarizing data (like tools, repositories, or lists), state the total count first before listing them.
+    
     --- USER PROFILE (Mem0 Long-Term Memory) ---
     {profile_facts}
     --------------------------------------------

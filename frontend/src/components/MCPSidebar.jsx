@@ -1,18 +1,33 @@
-import { useState } from 'react';
-import { Blocks, Plug, Loader2, ServerCrash, CheckCircle2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { GitBranch, Blocks, Plug, Loader2, ServerCrash, CheckCircle2 } from 'lucide-react';
 
 export default function MCPSidebar() {
   const [formData, setFormData] = useState({
-    name: 'My GitHub Account',
+    name: 'My Custom Server',
     transport: 'stdio',
     command: 'npx',
-    args: '-y,@modelcontextprotocol/server-github',
-    envKey: 'GITHUB_PERSONAL_ACCESS_TOKEN',
+    args: '-y,@modelcontextprotocol/server-postgres',
+    envKey: 'POSTGRES_URL',
     envVal: ''
   });
   
   const [status, setStatus] = useState('idle'); // idle, loading, success, error
   const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mcp_connected') === 'true') {
+      setStatus('success');
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setTimeout(() => setStatus('idle'), 3000);
+    }
+  }, []);
+
+  const handleGithubConnect = () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    window.location.href = `http://127.0.0.1:8000/api/oauth/github/login?token=${token}`;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -63,7 +78,19 @@ export default function MCPSidebar() {
           Connect external MCP servers to give CORE dynamic capabilities during your session.
         </p>
 
+        {/* GitHub OAuth Button */}
+        <div className="mb-6 pb-6 border-b border-border">
+          <button 
+            onClick={handleGithubConnect}
+            className="w-full bg-[#24292e] hover:bg-[#1b1f23] text-white font-medium py-3 rounded-lg flex items-center justify-center gap-3 transition-colors border border-slate-700 shadow-sm"
+          >
+            <GitBranch className="w-5 h-5" />
+            Connect with GitHub
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
+          <h3 className="text-sm font-bold text-slate-300">Manual Configuration</h3>
           <div className="space-y-1">
             <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Server Name</label>
             <input 
@@ -111,7 +138,7 @@ export default function MCPSidebar() {
             <div className="space-y-2">
               <input 
                 type="text" 
-                placeholder="Key (e.g. GITHUB_TOKEN)"
+                placeholder="Key (e.g. POSTGRES_URL)"
                 value={formData.envKey}
                 onChange={e => setFormData({...formData, envKey: e.target.value})}
                 className="w-full bg-slate-900 border border-border rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-1 focus:ring-accent outline-none"

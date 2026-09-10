@@ -34,11 +34,13 @@ from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.ingestion import router as ingestion_router
 from app.api.mcp import router as mcp_router
+from app.api.oauth import router as oauth_router
 
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(ingestion_router)
 app.include_router(mcp_router)
+app.include_router(oauth_router)
 
 @app.get("/")
 async def root():
