@@ -13,15 +13,18 @@ export default function DocumentSidebar() {
     }
   };
 
+  const [progressText, setProgressText] = useState('');
+
   const handleUpload = async () => {
     if (!file) return;
     setStatus('uploading');
+    setProgressText('');
 
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/documents/upload', {
+      const res = await fetch('http://127.0.0.1:8000/api/ingest/', {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + localStorage.getItem('token')
@@ -33,14 +36,35 @@ export default function DocumentSidebar() {
       const data = await res.json();
       
       setTaskId(data.task_id);
-      setStatus('success');
+      setStatus('processing');
       
-      // In a real app, we would poll /api/documents/status/{task_id} here
-      // For this demo, we'll just show success
-      setTimeout(() => {
-        setStatus('idle');
-        setFile(null);
-      }, 5000);
+      // Poll /api/ingest/{task_id}
+      const pollInterval = setInterval(async () => {
+        try {
+          const pollRes = await fetch(`http://127.0.0.1:8000/api/ingest/${data.task_id}`, {
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+          });
+          if (pollRes.ok) {
+            const pollData = await pollRes.json();
+            setProgressText(pollData.progress || '');
+            if (pollData.status === 'completed') {
+              clearInterval(pollInterval);
+              setStatus('success');
+              setTimeout(() => {
+                setStatus('idle');
+                setFile(null);
+                setProgressText('');
+              }, 5000);
+            } else if (pollData.status === 'failed') {
+              clearInterval(pollInterval);
+              setStatus('error');
+              setProgressText(pollData.error || 'Processing failed');
+            }
+          }
+        } catch (e) {
+          console.error("Polling error", e);
+        }
+      }, 2000);
 
     } catch (err) {
       setStatus('error');
@@ -85,7 +109,12 @@ export default function DocumentSidebar() {
                 Upload
               </button>
             )}
-            {status === 'uploading' && <Loader2 className="w-4 h-4 animate-spin text-secondary" />}
+            {(status === 'uploading' || status === 'processing') && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-secondary font-mono">{progressText}</span>
+                <Loader2 className="w-4 h-4 animate-spin text-secondary" />
+              </div>
+            )}
             {status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
             {status === 'error' && <AlertCircle className="w-4 h-4 text-rose-500" />}
           </div>
@@ -93,7 +122,13 @@ export default function DocumentSidebar() {
         
         {status === 'success' && (
           <p className="text-xs text-emerald-400 mt-3 text-center">
-            File queued for background processing.
+            File processed and successfully embedded!
+          </p>
+        )}
+        
+        {status === 'error' && (
+          <p className="text-xs text-rose-400 mt-3 text-center">
+            {progressText || 'An error occurred during upload.'}
           </p>
         )}
       </div>

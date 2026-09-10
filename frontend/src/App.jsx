@@ -5,10 +5,13 @@ import ApprovalModal from './components/ApprovalModal';
 import MCPSidebar from './components/MCPSidebar';
 import DocumentSidebar from './components/DocumentSidebar';
 import LoginScreen from './components/LoginScreen';
+import ThreadManager from './components/ThreadManager';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token') || null);
-  const [threadId, setThreadId] = useState(`thread_${Math.random().toString(36).substring(7)}`);
+  const [threadId, setThreadId] = useState(
+    localStorage.getItem('threadId') || `thread_${Math.random().toString(36).substring(7)}`
+  );
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -25,6 +28,40 @@ function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Load chat history when threadId changes
+  useEffect(() => {
+    if (!token) return;
+    localStorage.setItem('threadId', threadId);
+    
+    const fetchHistory = async () => {
+      setIsLoading(true);
+      try {
+        const res = await fetch(`http://127.0.0.1:8000/api/chat/threads/${threadId}`, {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setMessages(data.messages || []);
+        } else {
+          setMessages([]);
+        }
+      } catch (error) {
+        console.error("Failed to load history", error);
+        setMessages([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchHistory();
+  }, [threadId, token]);
+
+  const handleThreadChange = (newThreadId) => {
+    if (newThreadId !== threadId) {
+      setThreadId(newThreadId);
+    }
+  };
 
   const handleSend = async (e) => {
     e?.preventDefault();
@@ -186,11 +223,12 @@ function App() {
             </div>
             <h1 className="text-xl font-bold text-slate-100 tracking-tight">CORE Agent</h1>
           </div>
-          <div className="flex items-center gap-4 text-sm text-slate-400">
-            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span> {threadId}</span>
+          <div className="flex items-center gap-4">
+            <ThreadManager currentThread={threadId} onSelectThread={handleThreadChange} />
+            <div className="w-px h-6 bg-border"></div>
             <button 
               onClick={() => { localStorage.removeItem('token'); setToken(null); }}
-              className="text-slate-500 hover:text-rose-400 transition-colors"
+              className="text-sm text-slate-500 hover:text-rose-400 transition-colors"
             >
               Sign out
             </button>
@@ -207,17 +245,12 @@ function App() {
           )}
           
           {messages.map((msg, idx) => (
-            <div key={idx} className={`flex gap-4 max-w-4xl mx-auto ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-              <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-lg
-                ${msg.role === 'user' ? 'bg-primary' : 'bg-surface border border-border'}`}>
-                {msg.role === 'user' ? <User className="w-5 h-5 text-white" /> : <Bot className="w-6 h-6 text-accent" />}
-              </div>
-              
-              <div className={`flex flex-col gap-2 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+            <div key={idx} className={`flex w-full max-w-4xl mx-auto ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`flex flex-col gap-2 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                 {msg.toolStatuses?.length > 0 && (
                   <div className="flex flex-col gap-1.5 w-full">
                     {msg.toolStatuses.map((t, i) => (
-                      <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-surface border border-border text-xs text-slate-400 font-mono w-fit">
+                      <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface border border-border text-xs text-slate-400 font-mono w-fit">
                         {t.status === 'running' ? <Loader2 className="w-3 h-3 animate-spin text-primary" /> : <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
                         {t.name}()
                       </div>
@@ -225,11 +258,21 @@ function App() {
                   </div>
                 )}
                 
+                {(!msg.content && msg.isStreaming && (!msg.toolStatuses || msg.toolStatuses.length === 0)) && (
+                  <div className="py-2 flex items-center">
+                    <div className="flex items-center gap-1 h-5 px-1">
+                      <div className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                      <div className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                      <div className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce"></div>
+                    </div>
+                  </div>
+                )}
+                
                 {msg.content && (
-                  <div className={`px-5 py-4 rounded-2xl shadow-sm text-[15px]
+                  <div className={`text-[15px] overflow-x-auto
                     ${msg.role === 'user' 
-                      ? 'bg-primary text-white rounded-tr-sm' 
-                      : 'bg-surface border border-border text-slate-200 rounded-tl-sm prose'}`}>
+                      ? 'px-5 py-3.5 bg-surface border border-border/50 text-slate-200 rounded-3xl rounded-tr-sm shadow-sm' 
+                      : 'text-slate-200 prose prose-invert prose-p:leading-relaxed max-w-none'}`}>
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
                 )}
