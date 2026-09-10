@@ -5,6 +5,8 @@ from app.core.security import SECRET_KEY, ALGORITHM
 
 router = APIRouter(tags=["Auth"])
 
+from datetime import datetime, timedelta
+
 @router.post("/token")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     """
@@ -13,7 +15,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     For now, enter ANY username and password. 
     The 'username' you enter will become your 'user_id' in the database!
     """
-    payload = {"sub": form_data.username}
+    expire = datetime.utcnow() + timedelta(days=30)
+    payload = {
+        "sub": form_data.username,
+        "exp": expire
+    }
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
     
     return {"access_token": token, "token_type": "bearer"}
