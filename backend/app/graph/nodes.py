@@ -67,6 +67,12 @@ async def rag_node(state: AgentState) -> dict:
     system_prompt = f"""You are a helpful AI assistant representing the CORE platform. 
     Use the following retrieved context to answer the user's question. 
     If the context does not contain the answer, politely state that you do not know based on the provided documents.
+    IMPORTANT: Do NOT proactively mention the user's profile facts, name, or memories unless they are explicitly asked about or directly relevant to answering their current question. Keep greetings concise.
+    
+    FORMATTING RULES:
+    - ALWAYS format lists using proper Markdown bullets (e.g., `- **Item Name:** Description`).
+    - Never leave dangling markdown syntax like unmatched `**`.
+    - Synthesize the retrieved context naturally rather than just copy-pasting raw document fragments.
     
     --- USER PROFILE (Mem0 Long-Term Memory) ---
     {profile_facts}
@@ -186,6 +192,7 @@ async def general_chat_node(state: AgentState, config: RunnableConfig) -> dict:
     # 2. Generate Answer
     system_prompt = f"""You are a helpful AI assistant representing the CORE platform. 
     You are in a general conversation with the user.
+    IMPORTANT: Do NOT proactively mention the user's profile facts, name, or memories unless they are explicitly asked about or directly relevant to answering their current question. Keep greetings concise.
     
     --- USER PROFILE (Mem0 Long-Term Memory) ---
     {profile_facts}

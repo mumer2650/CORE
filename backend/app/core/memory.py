@@ -55,8 +55,20 @@ def extract_memory_background(message: str, user_id: str):
     """
     try:
         print(f"Extracting memories for user: {user_id}...")
+        
+        extraction_prompt = """
+        Extract persistent, highly relevant facts about the user from the provided text.
+        ONLY extract information related to:
+        - The user's technical preferences (e.g., preferred programming languages, tools, frameworks)
+        - The user's core project goals, AI startup details, or professional background
+        - High-level constraints or architectural requirements
+        
+        Do NOT extract transient information, conversational filler, temporary emotional states, or personal details like names of friends/family unless they are explicitly tied to a technical project.
+        If no relevant technical or professional facts are found, extract nothing.
+        """
+        
         # Mem0 analyzes the message and stores findings under the user_id
-        long_term_memory.add(message, user_id=user_id)
+        long_term_memory.add(message, user_id=user_id, prompt=extraction_prompt)
         print(f"Memory extraction complete for user: {user_id}.")
     except Exception as e:
         print(f"Mem0 extraction failed: {str(e)}")

@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Path, BackgroundTasks
+from fastapi.responses import StreamingResponse
+import json
 from pydantic import BaseModel
 from app.core.security import get_current_user_id
 from app.graph.graph import rag_graph
-from app.core.checkpointer import checkpointer
+from app.core.checkpointer import checkpointer, pool
 from app.core.memory import extract_memory_background
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
@@ -69,6 +71,19 @@ async def chat_with_agent(
 class ApproveRequest(BaseModel):
     thread_id: str
     approved: bool
+
+def _extract_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text = ""
+        for item in content:
+            if isinstance(item, str):
+                text += item
+            elif isinstance(item, dict) and "text" in item:
+                text += item["text"]
+        return text
+    return ""
 
 @router.post("/approve")
 async def approve_action(
@@ -167,3 +182,171 @@ async def get_chat_history(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stream")
+async def stream_chat_with_agent(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Endpoint to stream SSE tokens and graph state updates.
+    """
+    background_tasks.add_task(extract_memory_background, request.message, user_id)
+    
+    input_state = {
+        "messages": [HumanMessage(content=request.message)],
+        "metadata": {"user_id": user_id}
+    }
+    
+    config = {
+        "configurable": {
+            "thread_id": request.thread_id,
+            "user_id": user_id
+        }
+    }
+    
+    async def event_generator():
+        try:
+            async for event in rag_graph.astream_events(input_state, config, version="v1"):
+                # Ignore streaming from the supervisor node
+                if event.get("metadata", {}).get("langgraph_node") == "supervisor":
+                    continue
+                    
+                kind = event["event"]
+                
+                if kind == "on_chat_model_stream":
+                    if event.get("name") != "ChatGoogleGenerativeAI":
+                        continue
+                    chunk = event["data"]["chunk"]
+                    if hasattr(chunk, "content") and chunk.content:
+                        text_content = _extract_text(chunk.content)
+                        if text_content:
+                            yield f"data: {json.dumps({'type': 'token', 'content': text_content})}\n\n"
+                        
+                elif kind == "on_tool_start":
+                    yield f"data: {json.dumps({'type': 'tool_start', 'name': event['name']})}\n\n"
+                    
+                elif kind == "on_tool_end":
+                    yield f"data: {json.dumps({'type': 'tool_end', 'name': event['name']})}\n\n"
+
+            # Check if it hit a breakpoint
+            state = await rag_graph.aget_state(config)
+            if state.next:
+                pending_tools = state.values["messages"][-1].tool_calls
+                yield f"data: {json.dumps({'type': 'requires_action', 'pending_tools': pending_tools})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@router.post("/approve/stream")
+async def approve_action_stream(
+    request: ApproveRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Endpoint to approve a pending action and stream the remainder of the graph.
+    """
+    config = {"configurable": {"thread_id": request.thread_id, "user_id": user_id}}
+    
+    async def event_generator():
+        try:
+            from langchain_core.messages import ToolMessage
+            state = await rag_graph.aget_state(config)
+            
+            if not state.next:
+                yield f"data: {json.dumps({'type': 'error', 'detail': 'No pending action.'})}\n\n"
+                return
+                
+            if request.approved:
+                stream_coro = rag_graph.astream_events(None, config, version="v1")
+            else:
+                last_msg = state.values["messages"][-1]
+                rejection_msgs = [
+                    ToolMessage(
+                        tool_call_id=tc["id"],
+                        name=tc["name"],
+                        content="ERROR: The human user rejected this action for security reasons. Apologize and ask for a different approach."
+                    ) for tc in last_msg.tool_calls
+                ]
+                await rag_graph.aupdate_state(config, {"messages": rejection_msgs}, as_node="sensitive_tools")
+                stream_coro = rag_graph.astream_events(None, config, version="v1")
+
+            async for event in stream_coro:
+                # Ignore streaming from the supervisor node
+                if event.get("metadata", {}).get("langgraph_node") == "supervisor":
+                    continue
+                    
+                kind = event["event"]
+                if kind == "on_chat_model_stream":
+                    if event.get("name") != "ChatGoogleGenerativeAI":
+                        continue
+                    chunk = event["data"]["chunk"]
+                    if hasattr(chunk, "content") and chunk.content:
+                        text_content = _extract_text(chunk.content)
+                        if text_content:
+                            yield f"data: {json.dumps({'type': 'token', 'content': text_content})}\n\n"
+                elif kind == "on_tool_start":
+                    yield f"data: {json.dumps({'type': 'tool_start', 'name': event['name']})}\n\n"
+                elif kind == "on_tool_end":
+                    yield f"data: {json.dumps({'type': 'tool_end', 'name': event['name']})}\n\n"
+
+            # Check if it hit a breakpoint again
+            state = await rag_graph.aget_state(config)
+            if state.next:
+                pending_tools = state.values["messages"][-1].tool_calls
+                yield f"data: {json.dumps({'type': 'requires_action', 'pending_tools': pending_tools})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@router.get("/threads")
+async def get_threads(user_id: str = Depends(get_current_user_id)):
+    """Fetches all unique threads for a user."""
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT thread_id 
+                FROM checkpoints 
+                WHERE metadata->>'user_id' = %s 
+                GROUP BY thread_id 
+                ORDER BY max(checkpoint_id) DESC
+                """,
+                (user_id,)
+            )
+            rows = await cur.fetchall()
+            return {"threads": [r[0] for r in rows]}
+
+@router.get("/threads/{thread_id}")
+async def get_thread_history(thread_id: str, user_id: str = Depends(get_current_user_id)):
+    """Retrieves the conversation history for a specific thread."""
+    config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+    state = await rag_graph.aget_state(config)
+    
+    if not state or not state.values:
+        return {"messages": []}
+        
+    messages = state.values.get("messages", [])
+    history = []
+    
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            history.append({"role": "user", "content": _extract_text(msg.content)})
+        elif isinstance(msg, AIMessage):
+            tool_statuses = []
+            if getattr(msg, "tool_calls", None):
+                for tc in msg.tool_calls:
+                    tool_statuses.append({"name": tc["name"], "status": "done"})
+            history.append({"role": "assistant", "content": _extract_text(msg.content), "toolStatuses": tool_statuses})
+            
+    return {"messages": history}
