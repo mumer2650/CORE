@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Link2, FileText, Activity } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Send, Bot, User, Loader2, Plus, MessageSquare, Activity, ShieldAlert, Check, X, Code2, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import ApprovalModal from './components/ApprovalModal';
 import MCPSidebar from './components/MCPSidebar';
@@ -18,9 +18,9 @@ function App() {
   
   // Modal State
   const [approvalModal, setApprovalModal] = useState({ isOpen: false, pendingTools: [] });
-
   const messagesEndRef = useRef(null);
-  
+  const abortControllerRef = useRef(null);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -81,6 +81,8 @@ function App() {
     // Placeholder for AI message being streamed
     setMessages(prev => [...prev, { role: 'assistant', content: '', isStreaming: true, toolStatuses: [] }]);
 
+    abortControllerRef.current = new AbortController();
+
     try {
       const response = await fetch('http://127.0.0.1:8000/api/chat/stream', {
         method: 'POST',
@@ -89,6 +91,7 @@ function App() {
           'Authorization': 'Bearer ' + token
         },
         body: JSON.stringify({ message: userMessage, thread_id: threadId }),
+        signal: abortControllerRef.current.signal
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -126,15 +129,20 @@ function App() {
         }
       }
     } catch (error) {
-      console.error('Chat error:', error);
-      setMessages(prev => {
-        const newMsgs = [...prev];
-        newMsgs[newMsgs.length - 1].content = 'Error connecting to the server.';
-        newMsgs[newMsgs.length - 1].isStreaming = false;
-        return newMsgs;
-      });
+      if (error.name === 'AbortError') {
+        console.log('Stream stopped by user');
+      } else {
+        console.error('Chat error:', error);
+        setMessages(prev => {
+          const newMsgs = [...prev];
+          newMsgs[newMsgs.length - 1].content = 'Error connecting to the server.';
+          newMsgs[newMsgs.length - 1].isStreaming = false;
+          return newMsgs;
+        });
+      }
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -158,6 +166,7 @@ function App() {
         }
       } else if (data.type === 'requires_action') {
         setApprovalModal({ isOpen: true, pendingTools: data.pending_tools });
+        lastMsg.isStreaming = false;
       } else if (data.type === 'done') {
         lastMsg.isStreaming = false;
       } else if (data.type === 'error') {
@@ -177,6 +186,8 @@ function App() {
     // We append a new streaming message bubble to catch the continuation
     setMessages(prev => [...prev, { role: 'assistant', content: '', isStreaming: true, toolStatuses: [] }]);
 
+    abortControllerRef.current = new AbortController();
+
     try {
       const response = await fetch('http://127.0.0.1:8000/api/chat/approve/stream', {
         method: 'POST',
@@ -185,6 +196,7 @@ function App() {
           'Authorization': 'Bearer ' + token
         },
         body: JSON.stringify({ thread_id: threadId, approved }),
+        signal: abortControllerRef.current.signal
       });
 
       if (!response.body) throw new Error('No readable stream');
@@ -212,10 +224,33 @@ function App() {
         }
       }
     } catch (error) {
-      console.error('Approval stream error:', error);
+      if (error.name === 'AbortError') {
+        console.log('Approval stream stopped by user');
+      } else {
+        console.error('Approval stream error:', error);
+      }
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
     }
+  };
+
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+    setMessages(prev => {
+      const newMsgs = [...prev];
+      if (newMsgs.length > 0) {
+        newMsgs[newMsgs.length - 1].isStreaming = false;
+        if (!newMsgs[newMsgs.length - 1].content) {
+          newMsgs[newMsgs.length - 1].content = "*(Stopped generating)*";
+        }
+      }
+      return newMsgs;
+    });
   };
 
   if (!token) {
@@ -303,23 +338,36 @@ function App() {
         </div>
 
         {/* Input Area */}
-        <div className="p-4 bg-surface/30 border-t border-border backdrop-blur-md">
+        <div className="p-4 bg-surface/30 border-t border-border backdrop-blur-md relative">
+          
+          {/* Stop Generating Button was moved into the input form below */}
           <form onSubmit={handleSend} className="max-w-4xl mx-auto relative">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ask CORE anything..."
-              className="w-full bg-surface border border-border rounded-xl pl-5 pr-14 py-4 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-inner"
-              disabled={isLoading && !approvalModal.isOpen}
+              className="w-full bg-surface border border-border rounded-xl pl-5 pr-14 py-4 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-inner disabled:opacity-50"
+              disabled={isLoading || approvalModal.isOpen}
             />
-            <button
-              type="submit"
-              disabled={!input.trim() || (isLoading && !approvalModal.isOpen)}
-              className="absolute right-2 top-2 bottom-2 aspect-square rounded-lg bg-primary hover:bg-blue-600 disabled:bg-slate-700 disabled:text-slate-500 flex items-center justify-center text-white transition-colors"
-            >
-              {isLoading && !approvalModal.isOpen ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-            </button>
+            {isLoading && !approvalModal.isOpen ? (
+              <button
+                type="button"
+                onClick={handleStop}
+                className="absolute right-2 top-2 bottom-2 aspect-square rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-400 flex items-center justify-center transition-all shadow-sm"
+                title="Stop generating"
+              >
+                <Square className="w-4 h-4 fill-current" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim()}
+                className="absolute right-2 top-2 bottom-2 aspect-square rounded-lg bg-primary hover:bg-blue-600 disabled:bg-slate-700 disabled:text-slate-500 flex items-center justify-center text-white transition-colors"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            )}
           </form>
           <div className="max-w-4xl mx-auto mt-2 text-center text-xs text-slate-500">
             CORE can access uploaded documents and dynamic MCP tools.
