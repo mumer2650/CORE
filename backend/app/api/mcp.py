@@ -19,6 +19,7 @@ class MCPServerConfig(BaseModel):
     args: Optional[List[str]] = None
     env: Optional[Dict[str, str]] = None
     tools: List[MCPToolSchema]
+    disabled: bool = False
 
 # Global In-Memory Registry (In production, move to Postgres)
 # Maps user_id -> List of MCPServerConfig
@@ -109,3 +110,34 @@ async def register_mcp_server(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=400, detail=f"Failed to connect to MCP Server: {str(e)}")
+
+@router.get("/connections")
+async def get_connections(user_id: str = Depends(get_current_user_id)):
+    """Returns a list of all active MCP servers for the user."""
+    servers = user_mcp_registry.get(user_id, [])
+    return {
+        "connections": [
+            {"name": s.name, "disabled": s.disabled}
+            for s in servers
+        ]
+    }
+
+@router.patch("/connections/{name}/toggle")
+async def toggle_connection(name: str, user_id: str = Depends(get_current_user_id)):
+    """Toggles the disabled state of a specific MCP server."""
+    servers = user_mcp_registry.get(user_id, [])
+    for s in servers:
+        if s.name == name:
+            s.disabled = not s.disabled
+            return {"status": "success", "disabled": s.disabled}
+    raise HTTPException(status_code=404, detail="Server not found.")
+
+@router.delete("/connections/{name}")
+async def delete_connection(name: str, user_id: str = Depends(get_current_user_id)):
+    """Disconnects and completely removes an MCP server."""
+    servers = user_mcp_registry.get(user_id, [])
+    for idx, s in enumerate(servers):
+        if s.name == name:
+            del servers[idx]
+            return {"status": "success", "message": f"Disconnected {name}."}
+    raise HTTPException(status_code=404, detail="Server not found.")

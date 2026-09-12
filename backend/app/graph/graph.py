@@ -22,6 +22,8 @@ def route_tools(state: AgentState, config: RunnableConfig) -> str:
         dynamic_tool_names = []
         if user_id and user_id in user_mcp_registry:
             for s in user_mcp_registry[user_id]:
+                if getattr(s, 'disabled', False):
+                    continue
                 for t in s.tools:
                     dynamic_tool_names.append(t.name)
                     

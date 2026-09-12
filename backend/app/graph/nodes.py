@@ -188,8 +188,20 @@ async def general_chat_node(state: AgentState, config: RunnableConfig) -> dict:
     except Exception as e:
         print(f"Mem0 search error: {str(e)}")
         profile_facts = "Could not retrieve user profile."
-        
-    # 2. Generate Answer
+    # 2. Fetch Active Integrations
+    user_id = config["configurable"].get("user_id")
+    from app.api.mcp import user_mcp_registry
+    
+    active_integrations = []
+    if user_id and user_id in user_mcp_registry:
+        for s in user_mcp_registry[user_id]:
+            if not getattr(s, 'disabled', False):
+                active_integrations.append(s.name)
+    integration_text = ""
+    if active_integrations:
+        integration_text = f"\n--- ACTIVE INTEGRATIONS (MCP) ---\nYou currently have the following external integrations enabled: {', '.join(active_integrations)}\nWhen the user asks if you have access to these services, enthusiastically confirm that you DO have full access and are ready to help. Do not add defensive caveats about 'persistent access' or 'only when requested'.\n---------------------------------"
+
+    # 3. Generate Answer
     system_prompt = f"""You are a helpful AI assistant representing the CORE platform. 
     You are in a general conversation with the user.
     IMPORTANT: Do NOT proactively mention the user's profile facts, name, or memories unless they are explicitly asked about or directly relevant to answering their current question. Keep greetings concise.
@@ -199,13 +211,15 @@ async def general_chat_node(state: AgentState, config: RunnableConfig) -> dict:
     - Never leave dangling markdown syntax like unmatched `**`.
     - Provide clear, highly readable, and structured responses. 
     - If summarizing data (like tools, repositories, or lists), state the total count first before listing them.
+    - NEVER output raw tool names in your text response. If you want to use a tool, invoke it properly.
     
     --- USER PROFILE (Mem0 Long-Term Memory) ---
     {profile_facts}
     --------------------------------------------
+    {integration_text}
     """
     
-    # 3. Trim Messages
+    # 4. Trim Messages
     trimmed_messages = trim_messages(
         messages,
         max_tokens=4000, 
@@ -229,13 +243,13 @@ async def general_chat_node(state: AgentState, config: RunnableConfig) -> dict:
     invoke_messages = [SystemMessage(content=system_prompt)] + safe_messages
     
     from app.graph.tools import all_tools
-    from app.api.mcp import user_mcp_registry
     
-    # 4. Fetch Dynamic MCP Tools for this user
-    user_id = config["configurable"].get("user_id")
+    # 5. Fetch Dynamic MCP Tools for this user
     dynamic_tool_schemas = []
     if user_id and user_id in user_mcp_registry:
         for server in user_mcp_registry[user_id]:
+            if getattr(s, 'disabled', False) or getattr(server, 'disabled', False):
+                continue
             for t in server.tools:
                 schema = {
                     "type": "function",
@@ -288,6 +302,8 @@ async def sensitive_tools_node(state: AgentState, config: RunnableConfig):
         found = False
         if user_id and user_id in user_mcp_registry:
             for server in user_mcp_registry[user_id]:
+                if server.disabled:
+                    continue
                 if any(t.name == name for t in server.tools):
                     if server.transport == "sse":
                         from mcp.client.sse import sse_client
