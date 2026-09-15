@@ -1,4 +1,5 @@
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 import ast
 import operator as op
 
@@ -61,6 +62,28 @@ def delete_file(file_path: str) -> str:
     """DANGEROUS: Deletes a file from the system."""
     return f"File {file_path} successfully deleted. (Mock)"
 
-safe_tools = [calculator, web_search]
+@tool
+def search_knowledge_base(query: str, config: RunnableConfig) -> str:
+    """Searches the user's uploaded documents (PDFs, TXT, MD) for specific information. Use this when the user asks about their own documents or internal corporate knowledge."""
+    try:
+        from app.core.vector_store import get_vector_store
+        vector_store = get_vector_store()
+        
+        user_id = config.get("configurable", {}).get("user_id")
+        if not user_id:
+            return "Error: user_id not found in configuration."
+            
+        # Perform similarity search with user isolation
+        docs = vector_store.similarity_search(query, k=5, filter={"user_id": user_id})
+        
+        if not docs:
+            return "No relevant information found in your uploaded documents."
+            
+        context = "\n\n".join([f"--- Document Source: {doc.metadata.get('source_filename', 'Unknown')} ---\n{doc.page_content}" for doc in docs])
+        return context
+    except Exception as e:
+        return f"Error searching knowledge base: {str(e)}"
+
+safe_tools = [calculator, web_search, search_knowledge_base]
 sensitive_tools = [delete_file]
 all_tools = safe_tools + sensitive_tools
