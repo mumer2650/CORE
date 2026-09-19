@@ -90,6 +90,9 @@ async def register_mcp_server(
         if user_id not in user_mcp_registry:
             user_mcp_registry[user_id] = []
             
+        # Remove any existing connection with the same name to prevent duplicate tools
+        user_mcp_registry[user_id] = [s for s in user_mcp_registry[user_id] if s.name != request.name]
+            
         user_mcp_registry[user_id].append(MCPServerConfig(
             name=request.name,
             transport=request.transport,

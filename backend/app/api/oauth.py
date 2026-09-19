@@ -84,6 +84,9 @@ async def github_callback(code: str, state: str):
         if user_id not in user_mcp_registry:
             user_mcp_registry[user_id] = []
             
+        # Remove any existing connection with the same name to prevent duplicate tools
+        user_mcp_registry[user_id] = [s for s in user_mcp_registry[user_id] if s.name != "GitHub (OAuth)"]
+            
         user_mcp_registry[user_id].append(MCPServerConfig(
             name="GitHub (OAuth)",
             transport="stdio",
