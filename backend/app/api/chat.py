@@ -57,7 +57,7 @@ async def chat_with_agent(
             }
             
         # Normal return
-        ai_message = result["messages"][-1].content
+        ai_message = _extract_text(result["messages"][-1].content)
         return {
             "status": "completed",
             "response": ai_message,
@@ -128,7 +128,7 @@ async def approve_action(
             
         return {
             "status": "completed",
-            "response": result["messages"][-1].content
+            "response": _extract_text(result["messages"][-1].content)
         }
     except Exception as e:
         import traceback

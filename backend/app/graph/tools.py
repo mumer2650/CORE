@@ -73,8 +73,12 @@ def search_knowledge_base(query: str, config: RunnableConfig) -> str:
         if not user_id:
             return "Error: user_id not found in configuration."
             
-        # Perform similarity search with user isolation
-        docs = vector_store.similarity_search(query, k=5, filter={"user_id": user_id})
+        # Perform similarity search with relevance scores and thresholding
+        results = vector_store.similarity_search_with_relevance_scores(query, k=5, filter={"user_id": user_id})
+        
+        # Filter out chunks that don't meet a minimum similarity threshold
+        # (Using a baseline threshold like 0.3 for MiniLM embeddings)
+        docs = [doc for doc, score in results if score > 0.3]
         
         if not docs:
             return "No relevant information found in your uploaded documents."
