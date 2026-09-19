@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Database, UploadCloud, FileText, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Database, UploadCloud, FileText, Loader2, CheckCircle2, AlertCircle, Trash2, ExternalLink } from 'lucide-react';
 
 export default function DocumentSidebar() {
   const [file, setFile] = useState(null);
@@ -14,6 +14,39 @@ export default function DocumentSidebar() {
   };
 
   const [progressText, setProgressText] = useState('');
+  const [documents, setDocuments] = useState([]);
+
+  const fetchDocuments = async () => {
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/documents/', {
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDocuments(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch documents", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
+
+  const handleDelete = async (id) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/documents/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+      });
+      if (res.ok) {
+        setDocuments(prev => prev.filter(d => d.id !== id));
+      }
+    } catch (e) {
+      console.error("Failed to delete document", e);
+    }
+  };
 
   const handleUpload = async () => {
     if (!file) return;
@@ -50,6 +83,7 @@ export default function DocumentSidebar() {
             if (pollData.status === 'completed') {
               clearInterval(pollInterval);
               setStatus('success');
+              fetchDocuments(); // Refresh the list
               setTimeout(() => {
                 setStatus('idle');
                 setFile(null);
@@ -104,9 +138,9 @@ export default function DocumentSidebar() {
               <span className="text-sm text-slate-300 truncate">{file.name}</span>
             </div>
             
-            {status === 'idle' && (
+            {(status === 'idle' || status === 'error') && (
               <button onClick={handleUpload} className="text-xs bg-secondary text-white px-3 py-1.5 rounded hover:bg-emerald-600 transition-colors">
-                Upload
+                {status === 'error' ? 'Retry' : 'Upload'}
               </button>
             )}
             {(status === 'uploading' || status === 'processing') && (
@@ -131,6 +165,37 @@ export default function DocumentSidebar() {
             {progressText || 'An error occurred during upload.'}
           </p>
         )}
+
+        <div className="mt-8">
+          <h3 className="text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wider">Your Documents</h3>
+          <div className="space-y-2">
+            {documents.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">No documents uploaded yet.</p>
+            ) : (
+              documents.map(doc => (
+                <div key={doc.id} className="p-3 bg-slate-900 border border-border rounded-lg flex items-center justify-between group">
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                    <div className="flex flex-col overflow-hidden">
+                      <span className="text-sm text-slate-300 truncate" title={doc.filename}>{doc.filename}</span>
+                      <span className="text-[10px] text-slate-500">{new Date(doc.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {doc.storage_url && (
+                      <a href={doc.storage_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-slate-400 hover:text-secondary rounded hover:bg-surface transition-colors" title="View Document">
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
+                    <button onClick={() => handleDelete(doc.id)} className="p-1.5 text-slate-400 hover:text-rose-400 rounded hover:bg-surface transition-colors" title="Delete Document & Embeddings">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </aside>
   );

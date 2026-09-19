@@ -84,7 +84,7 @@ function App() {
     abortControllerRef.current = new AbortController();
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/chat/stream', {
+      const response = await fetch('http://127.0.0.1:8000/api/chat/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -102,32 +102,24 @@ function App() {
         return;
       }
 
-      if (!response.body) throw new Error('No readable stream');
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
+      const data = await response.json();
+      
+      setMessages(prev => {
+        const newMsgs = [...prev];
+        const lastMsg = { ...newMsgs[newMsgs.length - 1] };
+        lastMsg.isStreaming = false;
         
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\\n\\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.replace('data: ', '');
-            if (!dataStr) continue;
-            
-            try {
-              const data = JSON.parse(dataStr);
-              handleStreamEvent(data);
-            } catch (err) {
-              console.error('JSON parse error:', err);
-            }
-          }
+        if (data.status === 'requires_action') {
+            setApprovalModal({ isOpen: true, pendingTools: data.pending_tools });
+        } else if (data.status === 'completed') {
+            lastMsg.content = data.response;
+        } else {
+            lastMsg.content = "Error: unexpected response format";
         }
-      }
+        
+        newMsgs[newMsgs.length - 1] = lastMsg;
+        return newMsgs;
+      });
     } catch (error) {
       if (error.name === 'AbortError') {
         console.log('Stream stopped by user');
@@ -170,7 +162,7 @@ function App() {
       } else if (data.type === 'done') {
         lastMsg.isStreaming = false;
       } else if (data.type === 'error') {
-        lastMsg.content += `\\n\\n**Error:** ${data.detail}`;
+        lastMsg.content += `\n\n**Error:** ${data.detail}`;
         lastMsg.isStreaming = false;
       }
 
@@ -189,7 +181,7 @@ function App() {
     abortControllerRef.current = new AbortController();
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/chat/approve/stream', {
+      const response = await fetch('http://127.0.0.1:8000/api/chat/approve', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -199,30 +191,24 @@ function App() {
         signal: abortControllerRef.current.signal
       });
 
-      if (!response.body) throw new Error('No readable stream');
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
+      const data = await response.json();
+      
+      setMessages(prev => {
+        const newMsgs = [...prev];
+        const lastMsg = { ...newMsgs[newMsgs.length - 1] };
+        lastMsg.isStreaming = false;
         
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\\n\\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.replace('data: ', '');
-            if (!dataStr) continue;
-            
-            try {
-              const data = JSON.parse(dataStr);
-              handleStreamEvent(data);
-            } catch (err) {}
-          }
+        if (data.status === 'requires_action') {
+            setApprovalModal({ isOpen: true, pendingTools: data.pending_tools });
+        } else if (data.status === 'completed') {
+            lastMsg.content = data.response;
+        } else {
+            lastMsg.content = "Error: unexpected response format";
         }
-      }
+        
+        newMsgs[newMsgs.length - 1] = lastMsg;
+        return newMsgs;
+      });
     } catch (error) {
       if (error.name === 'AbortError') {
         console.log('Approval stream stopped by user');

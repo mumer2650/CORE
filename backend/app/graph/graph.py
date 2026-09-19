@@ -1,14 +1,12 @@
 from langgraph.graph import StateGraph, END
 from app.graph.state import AgentState
-from app.graph.nodes import rag_node, supervisor_node, general_chat_node, sensitive_tools_node
+from app.graph.nodes import general_chat_node, sensitive_tools_node
 from app.core.checkpointer import checkpointer
 from langgraph.prebuilt import ToolNode
 from app.graph.tools import safe_tools, sensitive_tools, all_tools
 from langchain_core.runnables import RunnableConfig
 
-def route_decision(state: AgentState) -> str:
-    # Read the next_node string from the state to determine the route
-    return state.get("next_node", "general_chat_node")
+
 
 def route_tools(state: AgentState, config: RunnableConfig) -> str:
     """Routes to sensitive_tools if ANY tool call is dangerous or remote, else safe_tools."""
@@ -36,13 +34,11 @@ def route_tools(state: AgentState, config: RunnableConfig) -> str:
 
 def create_basic_rag_graph():
     """
-    Creates a supervisor-routed workflow graph for Phase 3.
+    Creates a streamlined workflow graph with Agentic RAG.
     """
     workflow = StateGraph(AgentState)
     
     # Add nodes
-    workflow.add_node("supervisor", supervisor_node)
-    workflow.add_node("rag_node", rag_node)
     workflow.add_node("general_chat_node", general_chat_node)
     
     # Tool nodes
@@ -50,20 +46,7 @@ def create_basic_rag_graph():
     workflow.add_node("sensitive_tools", sensitive_tools_node) # Custom node that supports dynamic remote tools
     
     # Add edges
-    workflow.set_entry_point("supervisor")
-    
-    # Conditional edge from supervisor to workers
-    workflow.add_conditional_edges(
-        "supervisor",
-        route_decision,
-        {
-            "rag_node": "rag_node",
-            "general_chat_node": "general_chat_node"
-        }
-    )
-    
-    # End edges
-    workflow.add_edge("rag_node", END)
+    workflow.set_entry_point("general_chat_node")
     
     # Route general_chat_node output based on tool types
     workflow.add_conditional_edges("general_chat_node", route_tools, {
