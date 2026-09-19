@@ -21,3 +21,4 @@ litellm
 duckduckgo-search
 mcp
 langchain-mcp-adapters
+supabase
