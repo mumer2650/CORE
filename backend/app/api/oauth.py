@@ -57,6 +57,18 @@ async def github_callback(code: str, state: str):
         if not access_token:
             raise HTTPException(status_code=400, detail=f"No access token received: {data}")
 
+        # 2.5 Fetch GitHub Username
+        github_context = None
+        user_response = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+        )
+        if user_response.status_code == 200:
+            user_data = user_response.json()
+            github_login = user_data.get("login")
+            if github_login:
+                github_context = f"The user's GitHub username is '{github_login}'. ALWAYS use this exact username when interacting with GitHub tools."
+
     # 3. Register the GitHub MCP Server
     try:
         from mcp import ClientSession
@@ -84,13 +96,17 @@ async def github_callback(code: str, state: str):
         if user_id not in user_mcp_registry:
             user_mcp_registry[user_id] = []
             
+        # Remove any existing connection with the same name to prevent duplicate tools
+        user_mcp_registry[user_id] = [s for s in user_mcp_registry[user_id] if s.name != "GitHub (OAuth)"]
+            
         user_mcp_registry[user_id].append(MCPServerConfig(
             name="GitHub (OAuth)",
             transport="stdio",
             command="npx",
             args=["-y", "@modelcontextprotocol/server-github"],
             env={"GITHUB_PERSONAL_ACCESS_TOKEN": access_token},
-            tools=parsed_tools
+            tools=parsed_tools,
+            context=github_context
         ))
         
         # 4. Redirect back to frontend

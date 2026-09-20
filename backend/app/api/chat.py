@@ -112,16 +112,19 @@ async def approve_action(
                 ToolMessage(
                     tool_call_id=tc["id"],
                     name=tc["name"],
-                    content="ERROR: The human user rejected this action for security reasons. Apologize and ask for a different approach."
+                    content="ERROR: The human user rejected this action for security reasons."
                 ) for tc in last_msg.tool_calls
             ]
             # Trick the graph into thinking the "sensitive_tools" node ran and returned the rejection
             await rag_graph.aupdate_state(config, {"messages": rejection_msgs}, as_node="sensitive_tools")
             
-            # Now resume graph from the node AFTER sensitive_tools (which is general_chat_node)
-            result = await rag_graph.ainvoke(None, config)
+            # Instantly return to avoid making the user wait for an LLM apology
+            return {
+                "status": "completed",
+                "response": "*(Action rejected by user)*"
+            }
 
-        # Check if it interrupted again
+        # Check if it interrupted again (only applicable if approved=True)
         new_state = await rag_graph.aget_state(config)
         if new_state.next:
             return {"status": "requires_action", "pending_tools": result["messages"][-1].tool_calls}
@@ -271,11 +274,15 @@ async def approve_action_stream(
                     ToolMessage(
                         tool_call_id=tc["id"],
                         name=tc["name"],
-                        content="ERROR: The human user rejected this action for security reasons. Apologize and ask for a different approach."
+                        content="ERROR: The human user rejected this action for security reasons."
                     ) for tc in last_msg.tool_calls
                 ]
                 await rag_graph.aupdate_state(config, {"messages": rejection_msgs}, as_node="sensitive_tools")
-                stream_coro = rag_graph.astream_events(None, config, version="v1")
+                
+                # Instantly yield rejection string without waiting for LLM
+                yield f"data: {json.dumps({'type': 'token', 'content': '*(Action rejected by user)*'})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
 
             async for event in stream_coro:
                 # Ignore streaming from the supervisor node

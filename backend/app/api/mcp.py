@@ -20,6 +20,7 @@ class MCPServerConfig(BaseModel):
     env: Optional[Dict[str, str]] = None
     tools: List[MCPToolSchema]
     disabled: bool = False
+    context: Optional[str] = None
 
 # Global In-Memory Registry (In production, move to Postgres)
 # Maps user_id -> List of MCPServerConfig
@@ -89,6 +90,9 @@ async def register_mcp_server(
                     
         if user_id not in user_mcp_registry:
             user_mcp_registry[user_id] = []
+            
+        # Remove any existing connection with the same name to prevent duplicate tools
+        user_mcp_registry[user_id] = [s for s in user_mcp_registry[user_id] if s.name != request.name]
             
         user_mcp_registry[user_id].append(MCPServerConfig(
             name=request.name,
