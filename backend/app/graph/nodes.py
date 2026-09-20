@@ -48,13 +48,18 @@ async def general_chat_node(state: AgentState, config: RunnableConfig) -> dict:
     from app.api.mcp import user_mcp_registry
     
     active_integrations = []
+    integration_contexts = []
     if user_id and user_id in user_mcp_registry:
         for s in user_mcp_registry[user_id]:
             if not getattr(s, 'disabled', False):
                 active_integrations.append(s.name)
+                if getattr(s, 'context', None):
+                    integration_contexts.append(f"[{s.name} Context]: {s.context}")
+                    
     integration_text = ""
     if active_integrations:
-        integration_text = f"\n--- ACTIVE INTEGRATIONS (MCP) ---\nYou currently have the following external integrations enabled: {', '.join(active_integrations)}\nWhen the user asks if you have access to these services, enthusiastically confirm that you DO have full access and are ready to help. Do not add defensive caveats about 'persistent access' or 'only when requested'.\n---------------------------------"
+        context_str = "\n".join(integration_contexts)
+        integration_text = f"\n--- ACTIVE INTEGRATIONS (MCP) ---\nYou currently have the following external integrations enabled: {', '.join(active_integrations)}\nWhen the user asks if you have access to these services, enthusiastically confirm that you DO have full access and are ready to help. Do not add defensive caveats about 'persistent access' or 'only when requested'.\n{context_str}\n---------------------------------"
 
     # 3. Generate Answer
     system_prompt = f"""You are a helpful AI assistant representing the CORE platform. 
