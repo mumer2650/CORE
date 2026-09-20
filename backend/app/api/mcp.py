@@ -20,6 +20,7 @@ class MCPServerConfig(BaseModel):
     env: Optional[Dict[str, str]] = None
     tools: List[MCPToolSchema]
     disabled: bool = False
+    context: Optional[str] = None
 
 # Global In-Memory Registry (In production, move to Postgres)
 # Maps user_id -> List of MCPServerConfig
